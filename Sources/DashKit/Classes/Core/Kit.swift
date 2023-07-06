@@ -2,7 +2,9 @@ import Foundation
 import BitcoinCore
 import HdWalletKit
 import BigInt
+import RxSwift
 import HsToolKit
+import Hodler
 
 public class Kit: AbstractKit {
     private static let name = "DashKit"
@@ -83,7 +85,8 @@ public class Kit: AbstractKit {
 
         blockValidatorSet.add(blockValidator: blockValidatorChain)
 
-        let bitcoinCore = try BitcoinCoreBuilder(logger: logger)
+        let bitcoinCoreBuilder = BitcoinCoreBuilder(logger: logger)
+        let bitcoinCore = try bitcoinCoreBuilder
                 .set(network: network)
                 .set(extendedKey: extendedKey)
                 .set(initialSyncApi: initialSyncApi)
@@ -96,6 +99,7 @@ public class Kit: AbstractKit {
                 .set(blockHeaderHasher: x11Hasher)
                 .set(transactionInfoConverter: dashTransactionInfoConverter)
                 .set(blockValidator: blockValidatorSet)
+                .add(plugin: HodlerPlugin(addressConverter: bitcoinCoreBuilder.addressConverter, blockMedianTimeHelper: BlockMedianTimeHelper(storage: storage), publicKeyStorage: storage))
                 .set(purpose: .bip44)
                 .build()
         super.init(bitcoinCore: bitcoinCore, network: network)
@@ -131,8 +135,8 @@ public class Kit: AbstractKit {
 
         bitcoinCore.add(peerTaskHandler: masternodeSyncer)
 
-        masternodeSyncer.subscribeTo(publisher: bitcoinCore.initialBlockDownload.publisher)
-        masternodeSyncer.subscribeTo(publisher: bitcoinCore.peerGroup.publisher)
+        masternodeSyncer.subscribeTo(observable: bitcoinCore.initialBlockDownload.observable)
+        masternodeSyncer.subscribeTo(observable: bitcoinCore.peerGroup.observable)
 
         self.masternodeSyncer = masternodeSyncer
 
@@ -172,9 +176,12 @@ public class Kit: AbstractKit {
     public override func send(to address: String, value: Int, feeRate: Int, sortType: TransactionDataSortType, pluginData: [UInt8: IPluginData]) throws -> FullTransaction {
         try super.send(to: address, value: value, feeRate: feeRate, sortType: sortType)
     }
+    
+    
+    
 
-    public func transactions(fromUid: String? = nil, type: TransactionFilterType?, limit: Int? = nil) -> [DashTransactionInfo] {
-        cast(transactionInfos: super.transactions(fromUid: fromUid, type: type, limit: limit))
+    public func transactions(fromUid: String? = nil, type: TransactionFilterType?, limit: Int? = nil) -> Single<[DashTransactionInfo]> {
+        super.transactions(fromUid: fromUid, type: type, limit: limit).map { self.cast(transactionInfos: $0) }
     }
 
     override public func transaction(hash: String) -> DashTransactionInfo? {

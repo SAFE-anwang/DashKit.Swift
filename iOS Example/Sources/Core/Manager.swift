@@ -1,5 +1,5 @@
 import Foundation
-import Combine
+import RxSwift
 import BitcoinCore
 import HsToolKit
 
@@ -10,7 +10,7 @@ class Manager {
     private let keyWords = "mnemonic_words"
     private let syncModeKey = "syncMode"
 
-    let adapterSubject = PassthroughSubject<Void, Never>()
+    let adapterSignal = Signal()
     var adapters = [BaseAdapter]()
 
     init() {
@@ -41,10 +41,10 @@ class Manager {
         let logger = Logger(minLogLevel: Configuration.shared.minLogLevel)
 
         adapters = [
-            DashAdapter(words: words, testMode: configuration.testNet, syncMode: syncMode, logger: logger),
+            DashAdapter(words: words, testMode: configuration.testNet, syncMode: syncMode, logger: logger)
         ]
 
-        adapterSubject.send()
+        adapterSignal.notify()
     }
 
     var savedWords: [String]? {
