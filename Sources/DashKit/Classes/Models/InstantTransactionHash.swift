@@ -5,20 +5,20 @@ class InstantTransactionHash: Record {
     let txHash: Data
 
     override class var databaseTableName: String {
-        return "instantTransactionHashes"
+        "instantTransactionHashes"
     }
 
     enum Columns: String, ColumnExpression {
         case txHash
     }
 
-    required init(row: Row) {
+    required init(row: Row) throws {
         txHash = row[Columns.txHash]
 
-        super.init(row: row)
+        try super.init(row: row)
     }
 
-    override func encode(to container: inout PersistenceContainer) {
+    override func encode(to container: inout PersistenceContainer) throws {
         container[Columns.txHash] = txHash
     }
 
@@ -27,5 +27,4 @@ class InstantTransactionHash: Record {
 
         super.init()
     }
-
 }

@@ -9,7 +9,7 @@ class MasternodeListState: Record {
     private let primaryKey: String = MasternodeListState.primaryKey
 
     override class var databaseTableName: String {
-        return "masternodeListState"
+        "masternodeListState"
     }
 
     enum Columns: String, ColumnExpression {
@@ -17,13 +17,13 @@ class MasternodeListState: Record {
         case baseBlockHash
     }
 
-    required init(row: Row) {
+    required init(row: Row) throws {
         baseBlockHash = row[Columns.baseBlockHash]
 
-        super.init(row: row)
+        try super.init(row: row)
     }
 
-    override func encode(to container: inout PersistenceContainer) {
+    override func encode(to container: inout PersistenceContainer) throws {
         container[Columns.primaryKey] = primaryKey
         container[Columns.baseBlockHash] = baseBlockHash
     }
@@ -33,5 +33,4 @@ class MasternodeListState: Record {
 
         super.init()
     }
-
 }

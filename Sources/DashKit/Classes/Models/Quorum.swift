@@ -34,7 +34,7 @@ class Quorum: Record {
         case sig
     }
 
-    required init(row: Row) {
+    required init(row: Row) throws {
         dataHash = row[Columns.hash]
         version = row[Columns.version]
         type = row[Columns.type]
@@ -48,10 +48,10 @@ class Quorum: Record {
         quorumSig = row[Columns.quorumSig]
         sig = row[Columns.sig]
 
-        super.init(row: row)
+        try super.init(row: row)
     }
 
-    override func encode(to container: inout PersistenceContainer) {
+    override func encode(to container: inout PersistenceContainer) throws {
         container[Columns.hash] = dataHash
         container[Columns.version] = version
         container[Columns.type] = type
@@ -67,7 +67,7 @@ class Quorum: Record {
     }
 
     init(hash: Data, version: UInt16, type: UInt8, quorumHash: Data, typeWithQuorumHash: Data, quorumIndex: UInt16?, signers: Data, validMembers: Data, quorumPublicKey: Data, quorumVvecHash: Data, quorumSig: Data, sig: Data) {
-        self.dataHash = hash
+        dataHash = hash
         self.version = version
         self.type = type
         self.quorumHash = quorumHash
@@ -82,21 +82,18 @@ class Quorum: Record {
 
         super.init()
     }
-
 }
 
 extension Quorum: Hashable, Comparable {
-
     public func hash(into hasher: inout Hasher) {
         hasher.combine(dataHash)
     }
 
-    public static func ==(lhs: Quorum, rhs: Quorum) -> Bool {
-        return lhs.dataHash == rhs.dataHash
+    public static func == (lhs: Quorum, rhs: Quorum) -> Bool {
+        lhs.dataHash == rhs.dataHash
     }
 
-    public static func <(lhs: Quorum, rhs: Quorum) -> Bool {
-        return lhs.dataHash < rhs.dataHash
+    public static func < (lhs: Quorum, rhs: Quorum) -> Bool {
+        lhs.dataHash < rhs.dataHash
     }
-
 }

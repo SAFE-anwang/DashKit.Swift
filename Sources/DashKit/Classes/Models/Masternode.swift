@@ -16,7 +16,7 @@ class Masternode: Record {
     let platformNodeID: Data?
 
     override class var databaseTableName: String {
-        return "masternodes"
+        "masternodes"
     }
 
     enum Columns: String, ColumnExpression {
@@ -34,7 +34,11 @@ class Masternode: Record {
         case platformNodeID
     }
 
+<<<<<<< HEAD
     required init(row: Row) {
+=======
+    required init(row: Row) throws {
+>>>>>>> master
         nVersion = row[Columns.nVersion]
         proRegTxHash = row[Columns.proRegTxHash]
         confirmedHash = row[Columns.confirmedHash]
@@ -48,10 +52,14 @@ class Masternode: Record {
         platformHTTPPort = row[Columns.platformHTTPPort]
         platformNodeID = row[Columns.platformNodeID]
 
-        super.init(row: row)
+        try super.init(row: row)
     }
 
+<<<<<<< HEAD
     override func encode(to container: inout PersistenceContainer) {
+=======
+    override func encode(to container: inout PersistenceContainer) throws {
+>>>>>>> master
         container[Columns.nVersion] = nVersion
         container[Columns.proRegTxHash] = proRegTxHash
         container[Columns.confirmedHash] = confirmedHash
@@ -82,21 +90,18 @@ class Masternode: Record {
 
         super.init()
     }
-
 }
 
 extension Masternode: Hashable, Comparable {
-
     public func hash(into hasher: inout Hasher) {
         hasher.combine(proRegTxHash)
     }
 
-    public static func ==(lhs: Masternode, rhs: Masternode) -> Bool {
-        return lhs.proRegTxHash == rhs.proRegTxHash
+    public static func == (lhs: Masternode, rhs: Masternode) -> Bool {
+        lhs.proRegTxHash == rhs.proRegTxHash
     }
 
-    public static func <(lhs: Masternode, rhs: Masternode) -> Bool {
-        return lhs.proRegTxHash < rhs.proRegTxHash
+    public static func < (lhs: Masternode, rhs: Masternode) -> Bool {
+        lhs.proRegTxHash < rhs.proRegTxHash
     }
-
 }
