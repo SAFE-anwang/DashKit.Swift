@@ -44,8 +44,8 @@ public class Kit: AbstractKit {
         case .mainNet:
             let apiTransactionProviderUrl = "https://insight.dash.org/insight-api"
 
-            if case let .blockchair(key) = syncMode {
-                let blockchairApi = BlockchairApi(secretKey: key, chainId: network.blockchairChainId, logger: logger)
+            if case .blockchair = syncMode {
+                let blockchairApi = BlockchairApi(chainId: network.blockchairChainId, logger: logger)
                 let blockchairBlockHashFetcher = BlockchairBlockHashFetcher(blockchairApi: blockchairApi)
                 let blockchairProvider = BlockchairTransactionProvider(blockchairApi: blockchairApi, blockHashFetcher: blockchairBlockHashFetcher)
                 let insightApiProvider = InsightApi(url: apiTransactionProviderUrl, logger: logger)
@@ -211,10 +211,6 @@ public class Kit: AbstractKit {
 
     private func cast(transactionInfos: [TransactionInfo]) -> [DashTransactionInfo] {
         transactionInfos.compactMap { $0 as? DashTransactionInfo }
-    }
-
-    override public func send(to address: String, value: Int, feeRate: Int, sortType: TransactionDataSortType, pluginData _: [UInt8: IPluginData]) throws -> FullTransaction {
-        try super.send(to: address, value: value, feeRate: feeRate, sortType: sortType)
     }
 
     public func transactions(fromUid: String? = nil, type: TransactionFilterType?, limit: Int? = nil) -> [DashTransactionInfo] {
