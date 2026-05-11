@@ -31,6 +31,53 @@ public class Kit: AbstractKit {
     private var instantSend: InstantSend?
     private let dashTransactionInfoConverter: ITransactionInfoConverter
 
+    private enum ApiProviderMode {
+        case insightOnly
+        case hybridBlockchair
+        case forceBlockchair
+    }
+
+    private static func apiProviderMode(syncMode: BitcoinCore.SyncMode) -> ApiProviderMode {
+        switch syncMode {
+        case .blockchair:
+            // Keep legacy behavior for existing callers using explicit .blockchair mode.
+            return .hybridBlockchair
+        case .api:
+            switch DashKitConfiguration.shared.syncSourceStrategySnapshot() {
+            case .legacyApi:
+                return .insightOnly
+            case .hybridBlockchair:
+                return .hybridBlockchair
+            case .forceBlockchair:
+                return .forceBlockchair
+            }
+        default:
+            return .insightOnly
+        }
+    }
+
+    private static func blockchairProvider(networkType: NetworkType, network: INetwork, logger: Logger?) -> IApiTransactionProvider {
+        let legacyBlockchairApi = BlockchairApi(chainId: network.blockchairChainId, logger: logger)
+        let legacyBlockHashFetcher = BlockchairBlockHashFetcher(blockchairApi: legacyBlockchairApi)
+        let legacyProvider = BlockchairTransactionProvider(blockchairApi: legacyBlockchairApi, blockHashFetcher: legacyBlockHashFetcher)
+
+        let useNativeBlockchairApi = DashKitConfiguration.shared.useNativeBlockchairApiSnapshot()
+        guard useNativeBlockchairApi else {
+            return legacyProvider
+        }
+
+        let nativeClient: DashBlockchairApiClient
+        switch networkType {
+        case .mainNet:
+            nativeClient = DashBlockchairApiClient.createForMainNet(logger: logger)
+        case .testNet:
+            nativeClient = DashBlockchairApiClient.createForTestNet(logger: logger)
+        }
+
+        let nativeProvider = NativeBlockchairTransactionProvider(apiClient: nativeClient)
+        return FallbackApiTransactionProvider(primaryProvider: nativeProvider, fallbackProvider: legacyProvider)
+    }
+
     private init(extendedKey: HDExtendedKey?, watchAddressPublicKey: WatchAddressPublicKey?, walletId: String, syncMode: BitcoinCore.SyncMode = .api, networkType: NetworkType = .mainNet, confirmationsThreshold: Int = 6, logger: Logger?) throws {
         let network = networkType.network
         let logger = logger ?? Logger(minLogLevel: .verbose)
@@ -44,19 +91,39 @@ public class Kit: AbstractKit {
         case .mainNet:
             let apiTransactionProviderUrl = "https://insight.dash.org/insight-api"
 
-            if case .blockchair = syncMode {
-                let blockchairApi = BlockchairApi(chainId: network.blockchairChainId, logger: logger)
-                let blockchairBlockHashFetcher = BlockchairBlockHashFetcher(blockchairApi: blockchairApi)
-                let blockchairProvider = BlockchairTransactionProvider(blockchairApi: blockchairApi, blockHashFetcher: blockchairBlockHashFetcher)
+            switch Kit.apiProviderMode(syncMode: syncMode) {
+            case .insightOnly:
+                apiTransactionProvider = InsightApi(url: apiTransactionProviderUrl, logger: logger)
+            case .hybridBlockchair:
+                let blockchairProvider = Kit.blockchairProvider(networkType: networkType, network: network, logger: logger)
                 let insightApiProvider = InsightApi(url: apiTransactionProviderUrl, logger: logger)
 
-                apiTransactionProvider = BiApiBlockProvider(restoreProvider: insightApiProvider, syncProvider: blockchairProvider, apiSyncStateManager: apiSyncStateManager)
-            } else {
-                apiTransactionProvider = InsightApi(url: apiTransactionProviderUrl, logger: logger)
+                apiTransactionProvider = BiApiBlockProvider(
+                    restoreProvider: insightApiProvider,
+                    syncProvider: blockchairProvider,
+                    apiSyncStateManager: apiSyncStateManager
+                )
+            case .forceBlockchair:
+                apiTransactionProvider = Kit.blockchairProvider(networkType: networkType, network: network, logger: logger)
             }
 
         case .testNet:
-            apiTransactionProvider = InsightApi(url: "http://dash-testnet.horizontalsystems.xyz/apg", logger: logger)
+            let insightUrl = "http://dash-testnet.horizontalsystems.xyz/apg"
+            switch Kit.apiProviderMode(syncMode: syncMode) {
+            case .insightOnly:
+                apiTransactionProvider = InsightApi(url: insightUrl, logger: logger)
+            case .hybridBlockchair:
+                let blockchairProvider = Kit.blockchairProvider(networkType: networkType, network: network, logger: logger)
+                let insightApiProvider = InsightApi(url: insightUrl, logger: logger)
+
+                apiTransactionProvider = BiApiBlockProvider(
+                    restoreProvider: insightApiProvider,
+                    syncProvider: blockchairProvider,
+                    apiSyncStateManager: apiSyncStateManager
+                )
+            case .forceBlockchair:
+                apiTransactionProvider = Kit.blockchairProvider(networkType: networkType, network: network, logger: logger)
+            }
         }
 
         let paymentAddressParser = PaymentAddressParser(validScheme: "dash", removeScheme: true)

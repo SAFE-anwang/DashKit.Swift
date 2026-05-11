@@ -81,6 +81,30 @@ class DashGrdbStorage: GrdbStorage {
             }
         }
 
+        migrator.registerMigration("createBlockchairCache") { db in
+            try db.create(table: "blockchair_cache") { t in
+                t.autoIncrementedPrimaryKey("id")
+                t.column("cache_key", .text).notNull().unique()
+                t.column("cache_value", .blob).notNull()
+                t.column("expires_at", .integer).notNull()
+                t.column("created_at", .integer).notNull()
+            }
+
+            try db.create(index: "idx_blockchair_cache_key", on: "blockchair_cache", columns: ["cache_key"])
+            try db.create(index: "idx_blockchair_cache_expires", on: "blockchair_cache", columns: ["expires_at"])
+        }
+
+        migrator.registerMigration("createBlockchairSyncState") { db in
+            try db.create(table: "blockchair_sync_state") { t in
+                t.column("id", .integer).primaryKey()
+                t.column("last_synced_block_height", .integer).notNull().defaults(to: 0)
+                t.column("last_sync_timestamp", .integer).notNull()
+                t.column("sync_mode", .text).notNull().defaults(to: "incremental")
+            }
+
+            try db.execute(sql: "INSERT OR IGNORE INTO blockchair_sync_state (id, last_sync_timestamp) VALUES (1, 0)")
+        }
+
         return migrator
     }
 }
