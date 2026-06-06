@@ -196,7 +196,7 @@ public class DashBlockchairApiClient {
 
         var transactionItemsMap = [String: ApiTransactionItem]()
 
-        for chunk in addresses.chunked(into: addressBatchSize) {
+        for chunk in addresses.dashKitChunked(into: addressBatchSize) {
             let (addressItems, transactions) = try await fetchDashboardTransactions(addresses: chunk, stopHeight: stopHeight)
 
             for transaction in transactions {
@@ -227,7 +227,7 @@ public class DashBlockchairApiClient {
 
         var hashesMap = [Int: String]()
 
-        for chunk in uniqueHeights.chunked(into: 10) {
+        for chunk in uniqueHeights.dashKitChunked(into: 10) {
             let heightsValue = chunk.map(String.init).joined(separator: ",")
             let url = try buildUrl(
                 path: "/dashboards/blocks/\(heightsValue)",
@@ -373,6 +373,16 @@ public class DashBlockchairApiClient {
             return blockchairError.retryDelay
         }
         return min(60, pow(2.0, Double(attempt)))
+    }
+}
+
+extension Array {
+    fileprivate func dashKitChunked(into size: Int) -> [[Element]] {
+        guard size > 0 else { return [self] }
+
+        return stride(from: 0, to: count, by: size).map {
+            Array(self[$0 ..< Swift.min($0 + size, count)])
+        }
     }
 }
 
