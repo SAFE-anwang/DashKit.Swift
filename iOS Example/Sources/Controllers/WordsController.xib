@@ -72,12 +72,12 @@
                         <action selector="changeWordList:" destination="-1" eventType="valueChanged" id="CKI-BC-6St"/>
                     </connections>
                 </segmentedControl>
-                <segmentedControl opaque="NO" contentMode="scaleToFill" contentHorizontalAlignment="left" contentVerticalAlignment="top" segmentControlStyle="plain" selectedSegmentIndex="1" translatesAutoresizingMaskIntoConstraints="NO" id="I26-xv-GXa">
+                <segmentedControl opaque="NO" contentMode="scaleToFill" contentHorizontalAlignment="left" contentVerticalAlignment="top" segmentControlStyle="plain" selectedSegmentIndex="2" translatesAutoresizingMaskIntoConstraints="NO" id="I26-xv-GXa">
                     <rect key="frame" x="20" y="346" width="335" height="29"/>
                     <segments>
                         <segment title="Full"/>
                         <segment title="API"/>
-                        <segment title="New Wallet"/>
+                        <segment title="Blockchair"/>
                     </segments>
                 </segmentedControl>
             </subviews>

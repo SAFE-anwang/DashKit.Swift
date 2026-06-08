@@ -19,7 +19,7 @@ class DashAdapter: BaseAdapter {
     }
 
     override func transactions(fromUid: String?, type: TransactionFilterType? = nil, limit: Int) -> [TransactionRecord] {
-        dashKit.transactions(fromUid: fromUid, type: type, limit: limit)
+        dashKit.transactions(fromUid: fromUid, type: type, descending: true, limit: limit)
             .compactMap {
                 transactionRecord(fromTransaction: $0)
             }

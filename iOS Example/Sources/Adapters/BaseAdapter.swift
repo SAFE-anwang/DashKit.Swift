@@ -69,7 +69,7 @@ class BaseAdapter {
     }
 
     func transactions(fromUid: String?, type: TransactionFilterType? = nil, limit: Int) -> [TransactionRecord] {
-        abstractKit.transactions(fromUid: fromUid, type: type, limit: limit)
+        abstractKit.transactions(fromUid: fromUid, type: type, descending: true, limit: limit)
             .compactMap {
                 transactionRecord(fromTransaction: $0)
             }
@@ -137,11 +137,13 @@ extension BaseAdapter {
 
     func send(to address: String, amount: Decimal, sortType: TransactionDataSortType, pluginData: [UInt8: IPluginData] = [:]) throws {
         let satoshiAmount = convertToSatoshi(value: amount)
-        _ = try abstractKit.send(to: address, value: satoshiAmount, feeRate: feeRate, sortType: sortType, pluginData: pluginData)
+        let params = SendParameters(address: address, value: satoshiAmount, feeRate: feeRate, sortType: sortType, pluginData: pluginData)
+        _ = try abstractKit.send(params: params)
     }
 
     func availableBalance(for address: String?, pluginData: [UInt8: IPluginData] = [:]) -> Decimal {
-        let amount = (try? abstractKit.maxSpendableValue(toAddress: address, feeRate: feeRate, pluginData: pluginData)) ?? 0
+        let params = SendParameters(address: address, feeRate: feeRate, pluginData: pluginData)
+        let amount = (try? abstractKit.maxSpendableValue(params: params)) ?? 0
         return Decimal(amount) / coinRate
     }
 
@@ -154,14 +156,16 @@ extension BaseAdapter {
     }
 
     func minSpendableAmount(for address: String?) -> Decimal {
-        Decimal((try? abstractKit.minSpendableValue(toAddress: address)) ?? 0) / coinRate
+        let params = SendParameters(address: address)
+        return Decimal((try? abstractKit.minSpendableValue(params: params)) ?? 0) / coinRate
     }
 
     func fee(for value: Decimal, address: String?, pluginData: [UInt8: IPluginData] = [:]) -> Decimal {
         do {
             let amount = convertToSatoshi(value: value)
-            let fee = try abstractKit.fee(for: amount, toAddress: address, feeRate: feeRate, pluginData: pluginData)
-            return Decimal(fee) / coinRate
+            let params = SendParameters(address: address, value: amount, feeRate: feeRate, pluginData: pluginData)
+            let sendInfo = try abstractKit.sendInfo(params: params)
+            return Decimal(sendInfo.fee) / coinRate
         } catch {
             return 0
         }

@@ -43,16 +43,14 @@ public class Kit: AbstractKit {
         switch networkType {
         case .mainNet:
             let apiTransactionProviderUrl = "https://insight.dash.org/insight-api"
+            let insightApiProvider = InsightApi(url: apiTransactionProviderUrl, logger: logger)
 
             if case .blockchair = syncMode {
-                let blockchairApi = BlockchairApi(chainId: network.blockchairChainId, logger: logger)
-                let blockchairBlockHashFetcher = BlockchairBlockHashFetcher(blockchairApi: blockchairApi)
-                let blockchairProvider = BlockchairTransactionProvider(blockchairApi: blockchairApi, blockHashFetcher: blockchairBlockHashFetcher)
-                let insightApiProvider = InsightApi(url: apiTransactionProviderUrl, logger: logger)
-
-                apiTransactionProvider = BiApiBlockProvider(restoreProvider: insightApiProvider, syncProvider: blockchairProvider, apiSyncStateManager: apiSyncStateManager)
+                let blockchairProvider = NativeBlockchairTransactionProvider(apiClient: DashBlockchairApiClient.createForMainNet(logger: logger))
+                let fallbackProvider = FallbackApiTransactionProvider(primaryProvider: blockchairProvider, fallbackProvider: insightApiProvider)
+                apiTransactionProvider = BiApiBlockProvider(restoreProvider: insightApiProvider, syncProvider: fallbackProvider, apiSyncStateManager: apiSyncStateManager)
             } else {
-                apiTransactionProvider = InsightApi(url: apiTransactionProviderUrl, logger: logger)
+                apiTransactionProvider = insightApiProvider
             }
 
         case .testNet:

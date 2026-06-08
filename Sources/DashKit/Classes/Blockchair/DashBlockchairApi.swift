@@ -10,11 +10,21 @@ public enum BlockchairError: Error {
     case resourceNotFound
     case serverError(message: String)
     case parseError(details: String)
+    case incompleteResponse(details: String)
     case validationError(field: String, reason: String)
 
     public var isRetryable: Bool {
         switch self {
         case .networkUnavailable, .connectionTimeout, .rateLimitExceeded, .serverError:
+            return true
+        case .invalidApiKey, .resourceNotFound, .parseError, .incompleteResponse, .validationError:
+            return false
+        }
+    }
+
+    public var shouldFallback: Bool {
+        switch self {
+        case .networkUnavailable, .connectionTimeout, .rateLimitExceeded, .serverError, .incompleteResponse:
             return true
         case .invalidApiKey, .resourceNotFound, .parseError, .validationError:
             return false
@@ -44,24 +54,25 @@ public class RateLimitHandler {
         self.maxRequestsPerMinute = maxRequestsPerMinute
     }
 
-    public func canProceed() -> Bool {
-        queue.sync {
-            let cutoff = Date().addingTimeInterval(-60)
-            requestTimestamps = requestTimestamps.filter { $0 > cutoff }
-            return requestTimestamps.count < maxRequestsPerMinute
-        }
+    private func cleanup(now: Date = Date()) {
+        let cutoff = now.addingTimeInterval(-60)
+        requestTimestamps = requestTimestamps.filter { $0 > cutoff }
     }
 
-    public func recordRequest() {
-        queue.async { [weak self] in
-            self?.requestTimestamps.append(Date())
+    public func acquire() -> Bool {
+        queue.sync {
+            cleanup()
+            guard requestTimestamps.count < maxRequestsPerMinute else {
+                return false
+            }
+            requestTimestamps.append(Date())
+            return true
         }
     }
 
     public func waitTime() -> TimeInterval {
         queue.sync {
-            let cutoff = Date().addingTimeInterval(-60)
-            requestTimestamps = requestTimestamps.filter { $0 > cutoff }
+            cleanup()
             guard requestTimestamps.count >= maxRequestsPerMinute else { return 0 }
             let oldestRequest = requestTimestamps.first!
             return max(0, 60 - Date().timeIntervalSince(oldestRequest))
@@ -97,13 +108,14 @@ public class DashBlockchairApiClient {
         self.rateLimitHandler = RateLimitHandler(maxRequestsPerMinute: 60)
     }
 
-    public func fetchBlocks(startHeight: Int, endHeight: Int) async throws -> [BlockchairBlock] {
-        guard rateLimitHandler.canProceed() else {
-            let waitTime = rateLimitHandler.waitTime()
-            throw BlockchairError.rateLimitExceeded(retryAfter: waitTime)
+    private func acquireRateLimit() throws {
+        guard rateLimitHandler.acquire() else {
+            throw BlockchairError.rateLimitExceeded(retryAfter: rateLimitHandler.waitTime())
         }
+    }
 
-        rateLimitHandler.recordRequest()
+    public func fetchBlocks(startHeight: Int, endHeight: Int) async throws -> [BlockchairBlock] {
+        try acquireRateLimit()
 
         let url = try buildUrl(path: "/blocks", queryItems: [URLQueryItem(name: "height[]", value: "\(startHeight)..\(endHeight)")])
         let response: BlockchairBlockResponse = try await performRequest(url: url)
@@ -111,12 +123,7 @@ public class DashBlockchairApiClient {
     }
 
     public func fetchBlock(height: Int) async throws -> BlockchairBlock {
-        guard rateLimitHandler.canProceed() else {
-            let waitTime = rateLimitHandler.waitTime()
-            throw BlockchairError.rateLimitExceeded(retryAfter: waitTime)
-        }
-
-        rateLimitHandler.recordRequest()
+        try acquireRateLimit()
 
         let url = try buildUrl(path: "/blocks/\(height)")
         let response: BlockchairBlockResponse = try await performRequest(url: url)
@@ -127,14 +134,8 @@ public class DashBlockchairApiClient {
     }
 
     public func fetchTransactions(hashes: [String]) async throws -> [BlockchairTransaction] {
-        guard rateLimitHandler.canProceed() else {
-            let waitTime = rateLimitHandler.waitTime()
-            throw BlockchairError.rateLimitExceeded(retryAfter: waitTime)
-        }
-
         guard !hashes.isEmpty else { return [] }
-
-        rateLimitHandler.recordRequest()
+        try acquireRateLimit()
 
         let queryItems = hashes.map { URLQueryItem(name: "hash", value: $0) }
         let url = try buildUrl(path: "/transactions", queryItems: queryItems)
@@ -143,12 +144,7 @@ public class DashBlockchairApiClient {
     }
 
     public func fetchTransaction(hash: String) async throws -> BlockchairTransaction {
-        guard rateLimitHandler.canProceed() else {
-            let waitTime = rateLimitHandler.waitTime()
-            throw BlockchairError.rateLimitExceeded(retryAfter: waitTime)
-        }
-
-        rateLimitHandler.recordRequest()
+        try acquireRateLimit()
 
         let url = try buildUrl(path: "/transactions/\(hash)")
         let response: BlockchairTransactionResponse = try await performRequest(url: url)
@@ -159,12 +155,7 @@ public class DashBlockchairApiClient {
     }
 
     public func fetchOutputs(address: String, limit: Int = 100) async throws -> [BlockchairOutput] {
-        guard rateLimitHandler.canProceed() else {
-            let waitTime = rateLimitHandler.waitTime()
-            throw BlockchairError.rateLimitExceeded(retryAfter: waitTime)
-        }
-
-        rateLimitHandler.recordRequest()
+        try acquireRateLimit()
 
         let url = try buildUrl(
             path: "/outputs",
@@ -179,12 +170,7 @@ public class DashBlockchairApiClient {
     }
 
     public func fetchStats() async throws -> BlockchairStats {
-        guard rateLimitHandler.canProceed() else {
-            let waitTime = rateLimitHandler.waitTime()
-            throw BlockchairError.rateLimitExceeded(retryAfter: waitTime)
-        }
-
-        rateLimitHandler.recordRequest()
+        try acquireRateLimit()
 
         let url = try buildUrl(path: "/stats")
         let response: BlockchairStatsResponse = try await performRequest(url: url)
@@ -198,6 +184,12 @@ public class DashBlockchairApiClient {
 
         for chunk in addresses.dashKitChunked(into: addressBatchSize) {
             let (addressItems, transactions) = try await fetchDashboardTransactions(addresses: chunk, stopHeight: stopHeight)
+            let addressItemMap = addressItems.reduce(into: [String: ApiAddressItem]()) { result, item in
+                guard let address = item.address else {
+                    return
+                }
+                result[address] = item
+            }
 
             for transaction in transactions {
                 guard let blockHeight = transaction.blockId else {
@@ -212,7 +204,7 @@ public class DashBlockchairApiClient {
                     )
                 }
 
-                if let addressItem = addressItems.first(where: { transaction.address == $0.address }) {
+                if let addressItem = addressItemMap[transaction.address] {
                     transactionItemsMap[transaction.hash]?.apiAddressItems.append(addressItem)
                 }
             }
@@ -228,6 +220,7 @@ public class DashBlockchairApiClient {
         var hashesMap = [Int: String]()
 
         for chunk in uniqueHeights.dashKitChunked(into: 10) {
+            try acquireRateLimit()
             let heightsValue = chunk.map(String.init).joined(separator: ",")
             let url = try buildUrl(
                 path: "/dashboards/blocks/\(heightsValue)",
@@ -245,6 +238,8 @@ public class DashBlockchairApiClient {
     }
 
     private func fetchDashboardTransactions(addresses: [String], stopHeight: Int?, offset: Int = 0, receivedScripts: [ApiAddressItem] = [], receivedTransactions: [BlockchairDashboardTransaction] = []) async throws -> ([ApiAddressItem], [BlockchairDashboardTransaction]) {
+        try acquireRateLimit()
+
         let url = try buildUrl(
             path: "/dashboards/addresses/\(addresses.joined(separator: ","))",
             queryItems: [
@@ -254,25 +249,34 @@ public class DashBlockchairApiClient {
             ]
         )
 
-        let response: BlockchairAddressDashboardsResponse = try await performRequest(url: url)
+        let response: BlockchairAddressDashboardsResponse
+        do {
+            response = try await performRequest(url: url)
+        } catch BlockchairError.resourceNotFound {
+            if offset == 0, receivedTransactions.isEmpty, receivedScripts.isEmpty {
+                return ([], [])
+            }
+            throw BlockchairError.incompleteResponse(details: "Unexpected 404 while fetching address transactions at offset \(offset)")
+        }
         let scriptsSlice = response.data.addresses.map { ApiAddressItem(script: $0.value.scriptHex, address: $0.key) }
-        let filteredTransactions = response.data.transactions.filter { transaction in
+        let pageTransactions = response.data.transactions
+        let filteredTransactions = pageTransactions.filter { transaction in
             guard let height = transaction.blockId, let stopHeight else {
                 return true
             }
             return stopHeight < height
         }
-        let scriptsMerged = receivedScripts + scriptsSlice
+        let scriptsMerged = receivedScripts.isEmpty ? scriptsSlice : receivedScripts
         let transactionsMerged = receivedTransactions + filteredTransactions
 
-        if filteredTransactions.count < transactionPageLimit {
+        if pageTransactions.count < transactionPageLimit {
             return (scriptsMerged, transactionsMerged)
         }
 
         return try await fetchDashboardTransactions(
             addresses: addresses,
             stopHeight: stopHeight,
-            offset: offset + filteredTransactions.count,
+            offset: offset + pageTransactions.count,
             receivedScripts: scriptsMerged,
             receivedTransactions: transactionsMerged
         )
@@ -327,6 +331,8 @@ public class DashBlockchairApiClient {
                     throw BlockchairError.serverError(message: "Unexpected status code: \(httpResponse.statusCode)")
                 }
 
+            } catch is CancellationError {
+                throw CancellationError()
             } catch let error as BlockchairError {
                 if error.isRetryable && attempt < maxRetries - 1 {
                     lastError = error
@@ -336,13 +342,14 @@ public class DashBlockchairApiClient {
                 }
                 throw error
             } catch {
-                lastError = error
-                if attempt < maxRetries - 1 {
-                    let delay = calculateRetryDelay(attempt: attempt, error: error)
+                let mappedError = mapToBlockchairError(error)
+                lastError = mappedError
+                if mappedError.isRetryable && attempt < maxRetries - 1 {
+                    let delay = calculateRetryDelay(attempt: attempt, error: mappedError)
                     try await Task.sleep(nanoseconds: UInt64(delay * 1_000_000_000))
                     continue
                 }
-                throw BlockchairError.networkUnavailable
+                throw mappedError
             }
         }
 
@@ -373,6 +380,29 @@ public class DashBlockchairApiClient {
             return blockchairError.retryDelay
         }
         return min(60, pow(2.0, Double(attempt)))
+    }
+
+    private func mapToBlockchairError(_ error: Error) -> BlockchairError {
+        if let blockchairError = error as? BlockchairError {
+            return blockchairError
+        }
+
+        if let urlError = error as? URLError {
+            switch urlError.code {
+            case .cancelled:
+                return .networkUnavailable
+            case .timedOut:
+                return .connectionTimeout
+            case .badServerResponse:
+                return .serverError(message: urlError.localizedDescription)
+            case .notConnectedToInternet, .networkConnectionLost, .cannotFindHost, .cannotConnectToHost, .dnsLookupFailed, .internationalRoamingOff, .dataNotAllowed, .secureConnectionFailed:
+                return .networkUnavailable
+            default:
+                return .networkUnavailable
+            }
+        }
+
+        return .serverError(message: error.localizedDescription)
     }
 }
 
@@ -414,6 +444,12 @@ public class NativeBlockchairTransactionProvider: IApiTransactionProvider {
     public func transactions(addresses: [String], stopHeight: Int?) async throws -> [ApiTransactionItem] {
         let items = try await apiClient.fetchAddressTransactions(addresses: addresses, stopHeight: stopHeight)
         let hashesMap = try await apiClient.fetchBlockHashes(heights: items.map(\.blockHeight))
+        let missingHeights = Set(items.map(\.blockHeight)).subtracting(hashesMap.keys)
+
+        guard missingHeights.isEmpty else {
+            let heights = missingHeights.sorted().map(String.init).joined(separator: ",")
+            throw BlockchairError.incompleteResponse(details: "Missing block hashes for heights: \(heights)")
+        }
 
         return items.compactMap { item in
             guard let blockHash = hashesMap[item.blockHeight] else {

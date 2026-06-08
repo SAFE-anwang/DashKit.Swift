@@ -13,8 +13,10 @@ public class FallbackApiTransactionProvider: IApiTransactionProvider {
     public func transactions(addresses: [String], stopHeight: Int?) async throws -> [ApiTransactionItem] {
         do {
             return try await primaryProvider.transactions(addresses: addresses, stopHeight: stopHeight)
-        } catch {
+        } catch let error as BlockchairError where error.shouldFallback {
             return try await fallbackProvider.transactions(addresses: addresses, stopHeight: stopHeight)
+        } catch {
+            throw error
         }
     }
 }
