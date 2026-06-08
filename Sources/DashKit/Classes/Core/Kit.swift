@@ -33,24 +33,36 @@ public class Kit: AbstractKit {
 
     private init(extendedKey: HDExtendedKey?, watchAddressPublicKey: WatchAddressPublicKey?, walletId: String, syncMode: BitcoinCore.SyncMode = .api, networkType: NetworkType = .mainNet, confirmationsThreshold: Int = 6, logger: Logger?) throws {
         let network = networkType.network
+        let effectiveSyncMode: BitcoinCore.SyncMode
+
+        switch networkType {
+        case .mainNet:
+            effectiveSyncMode = syncMode
+        case .testNet:
+            if case .blockchair = syncMode {
+                effectiveSyncMode = .api
+            } else {
+                effectiveSyncMode = syncMode
+            }
+        }
+
         let logger = logger ?? Logger(minLogLevel: .verbose)
-        let databaseFilePath = try DirectoryHelper.directoryURL(for: Kit.name).appendingPathComponent(Kit.databaseFileName(walletId: walletId, networkType: networkType, syncMode: syncMode)).path
+        let databaseFilePath = try DirectoryHelper.directoryURL(for: Kit.name).appendingPathComponent(Kit.databaseFileName(walletId: walletId, networkType: networkType, syncMode: effectiveSyncMode)).path
         let storage = DashGrdbStorage(databaseFilePath: databaseFilePath)
         self.storage = storage
-        let apiSyncStateManager = ApiSyncStateManager(storage: storage, restoreFromApi: network.syncableFromApi && syncMode != BitcoinCore.SyncMode.full)
+        let apiSyncStateManager = ApiSyncStateManager(storage: storage, restoreFromApi: network.syncableFromApi && effectiveSyncMode != BitcoinCore.SyncMode.full)
 
         let apiTransactionProvider: IApiTransactionProvider
+        var sendType = BitcoinCore.SendType.p2p
         switch networkType {
         case .mainNet:
             let apiTransactionProviderUrl = "https://insight.dash.org/insight-api"
 
-            if case .blockchair = syncMode {
+            if case .blockchair = effectiveSyncMode {
                 let blockchairApi = BlockchairApi(chainId: network.blockchairChainId, logger: logger)
                 let blockchairBlockHashFetcher = BlockchairBlockHashFetcher(blockchairApi: blockchairApi)
-                let blockchairProvider = BlockchairTransactionProvider(blockchairApi: blockchairApi, blockHashFetcher: blockchairBlockHashFetcher)
-                let insightApiProvider = InsightApi(url: apiTransactionProviderUrl, logger: logger)
-
-                apiTransactionProvider = BiApiBlockProvider(restoreProvider: insightApiProvider, syncProvider: blockchairProvider, apiSyncStateManager: apiSyncStateManager)
+                apiTransactionProvider = BlockchairTransactionProvider(blockchairApi: blockchairApi, blockHashFetcher: blockchairBlockHashFetcher)
+                sendType = .api(blockchairApi: blockchairApi)
             } else {
                 apiTransactionProvider = InsightApi(url: apiTransactionProviderUrl, logger: logger)
             }
@@ -95,14 +107,15 @@ public class Kit: AbstractKit {
             .set(extendedKey: extendedKey)
             .set(watchAddressPublicKey: watchAddressPublicKey)
             .set(apiTransactionProvider: apiTransactionProvider)
-            .set(checkpoint: Checkpoint.resolveCheckpoint(network: network, syncMode: syncMode, storage: storage))
+            .set(checkpoint: Checkpoint.resolveCheckpoint(network: network, syncMode: effectiveSyncMode, storage: storage))
             .set(apiSyncStateManager: apiSyncStateManager)
             .set(paymentAddressParser: paymentAddressParser)
             .set(walletId: walletId)
             .set(confirmationsThreshold: confirmationsThreshold)
             .set(peerSize: 10)
             .set(storage: storage)
-            .set(syncMode: syncMode)
+            .set(syncMode: effectiveSyncMode)
+            .set(sendType: sendType)
             .set(blockHeaderHasher: x11Hasher)
             .set(transactionInfoConverter: dashTransactionInfoConverter)
             .set(blockValidator: blockValidatorSet)
